@@ -51,6 +51,16 @@ jobs:
           restore-keys: |
             bot-offset-
 
+      # 시크릿에 섞여 들어간 공백·줄바꿈을 제거합니다.
+      # (자세한 이유는 daily-brief.yml 의 같은 단계 주석 참고)
+      - name: 시크릿 공백 제거
+        run: |
+          for v in TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID; do
+            clean=$(printf '%s' "${!v}" | tr -d '[:space:]')
+            echo "::add-mask::$clean"
+            echo "$v=$clean" >> "$GITHUB_ENV"
+          done
+
       - name: 대기 중인 클릭 처리
         run: python bot_server.py --once
 

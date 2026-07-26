@@ -52,6 +52,26 @@ jobs:
           done
           echo "시크릿 3개 모두 확인됨"
 
+      # 시크릿에 섞여 들어간 공백·줄바꿈을 제거합니다.
+      #
+      # 왜 필요한가: 터미널에 출력된 토큰이 화면 폭을 넘어 두 줄로 표시되면,
+      # 마우스로 복사할 때 줄바꿈이 함께 딸려옵니다. 토큰은 HTTP 헤더로 전송되는데
+      # 헤더에는 줄바꿈이 들어갈 수 없어서 'Header has invalid value' 로 실패합니다.
+      # 토큰 자체에는 공백이 없으므로 전부 제거해도 안전하고, 원래 값이 복원됩니다.
+      - name: 시크릿 공백 제거
+        run: |
+          for v in TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID CLAUDE_CODE_OAUTH_TOKEN; do
+            raw="${!v}"
+            clean=$(printf '%s' "$raw" | tr -d '[:space:]')
+            # 공백을 뺀 값은 등록된 시크릿과 다른 문자열이라 GitHub 이 자동으로
+            # 가려주지 않습니다. 로그에 새어나가지 않도록 직접 가리기를 요청합니다.
+            echo "::add-mask::$clean"
+            if [ "$raw" != "$clean" ]; then
+              echo "$v 에서 공백/줄바꿈을 제거했습니다."
+            fi
+            echo "$v=$clean" >> "$GITHUB_ENV"
+          done
+
       # 1단계 — 뉴스 수집. 월요일은 주말 기사까지 담기 위해 범위를 넓힙니다.
       - name: 뉴스 수집
         run: |
