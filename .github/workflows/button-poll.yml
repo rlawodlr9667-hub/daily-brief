@@ -1,0 +1,62 @@
+name: 버튼 클릭 처리
+
+# 텔레그램은 봇에게 클릭 알림을 밀어주지 않습니다. 봇이 물어보러 가야 합니다.
+# 개인 PC에는 공개 주소가 없으니 여기서 주기적으로 물어봅니다.
+#
+# 클릭은 텔레그램이 24시간 보관하므로 유실되지 않습니다. 늦게 도착할 뿐입니다.
+#
+# 무료 사용량(비공개 저장소 월 2,000분) 안에 들어가도록 간격을 나눠 두었습니다.
+#   아침 시간대(한국시간 08~10시) : 5분마다   -> 실제로 읽는 시간이라 촘촘하게
+#   그 외                        : 1시간마다  -> 사용량 절약
+# 대략 하루 46회, 한 달 약 1,380분입니다. (생성 작업 180분을 더해도 여유가 있습니다)
+on:
+  schedule:
+    - cron: '*/5 23,0 * * *'    # UTC 23:00~01:00 = 한국시간 08:00~10:00
+    - cron: '0 1-22 * * *'      # 나머지 시간은 매시 정각
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# 여러 개가 동시에 돌면 텔레그램 알림을 서로 가로챕니다. 반드시 하나씩 돌려야 합니다.
+concurrency:
+  group: button-poll
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    env:
+      TZ: Asia/Seoul
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      PYTHONIOENCODING: utf-8
+
+    steps:
+      # 브리핑 파일을 읽어야 하므로 최신 커밋을 받아옵니다.
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # 어디까지 처리했는지 기억해 둡니다. 없으면 같은 클릭에 두 번 답장하게 됩니다.
+      - name: 처리 위치 복원
+        uses: actions/cache/restore@v4
+        with:
+          path: data/bot_offset.txt
+          key: bot-offset-${{ github.run_id }}
+          restore-keys: |
+            bot-offset-
+
+      - name: 대기 중인 클릭 처리
+        run: python bot_server.py --once
+
+      - name: 처리 위치 저장
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/bot_offset.txt
+          key: bot-offset-${{ github.run_id }}

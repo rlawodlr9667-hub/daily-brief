@@ -1,0 +1,20 @@
+# 줄바꿈 문자를 플랫폼별로 못박습니다.
+# 이 프로젝트는 Windows(내 PC)와 Linux(GitHub Actions) 양쪽에서 돌기 때문에
+# 지정해 두지 않으면 파일이 오갈 때 줄바꿈이 바뀌면서 문제가 생길 수 있습니다.
+
+# 기본: 저장소에는 LF 로 보관
+* text=auto eol=lf
+
+# PowerShell 스크립트는 Windows 전용이므로 CRLF 로 받습니다.
+# (BOM 은 줄바꿈과 무관하므로 그대로 유지됩니다 — PowerShell 5.1 이 한글을
+#  제대로 읽으려면 BOM 있는 UTF-8 이어야 합니다)
+*.ps1 text eol=crlf
+
+# 리눅스에서 sed 로 읽는 파일들은 반드시 LF
+*.yml text eol=lf
+*.yaml text eol=lf
+automation/brief_prompt.txt text eol=lf
+
+# 파이썬은 양쪽에서 다 도므로 LF 로 통일
+*.py text eol=lf
+*.md text eol=lf
