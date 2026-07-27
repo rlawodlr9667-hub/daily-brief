@@ -88,9 +88,25 @@ def build_keyboard(date_str, cats):
         {"text": f"{emoji} {label}", "callback_data": f"b|{key}|{date_str}"}
         for key, label, emoji in cats
     ]
-    rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
-    rows.append([{"text": "📚 전체 받기", "callback_data": f"b|__all__|{date_str}"}])
-    return {"inline_keyboard": rows}
+    # 항목 버튼만 둡니다. '전체 받기'는 일부러 뺐습니다. 아침에 긴 글이
+    # 한꺼번에 쏟아지지 않고, 읽고 싶은 것만 골라 받는 것이 이 봇의 방식입니다.
+    # (되살리려면 아래 한 줄의 주석을 풀면 됩니다. handle_callback 의
+    #  __all__ 처리는 그대로 남겨 두었습니다)
+    # rows.append([{"text": "📚 전체 받기", "callback_data": f"b|__all__|{date_str}"}])
+    return {"inline_keyboard": [buttons[i:i + 2]
+                                for i in range(0, len(buttons), 2)]}
+
+
+def menu_text(date_str):
+    """알림 메시지 본문.
+
+    기사 내용은 여기에 넣지 않습니다. 아침에는 "요약해 뒀다"는 사실만 알리고,
+    실제 기사는 버튼을 눌렀을 때만 보냅니다. 안 그러면 아침마다 긴 글 5개가
+    한꺼번에 쏟아져서, 정작 읽고 싶은 항목을 찾기가 더 번거로워집니다.
+    """
+    return (f"<b>📊 오늘의 경제 동향을 요약했습니다</b>\n"
+            f"<i>{pretty_date(date_str)}</i>\n\n"
+            f"보고 싶은 항목을 눌러 주세요.")
 
 
 def send_menu(date_str=None):
@@ -104,12 +120,7 @@ def send_menu(date_str=None):
         return 1
 
     token, chat_id = tg.load_config()
-    text = (
-        f"<b>📊 {pretty_date(date_str)} 경제 브리핑</b>\n\n"
-        f"준비된 항목 {len(cats)}개입니다. 보고 싶은 항목을 눌러 주세요.\n"
-        f"<i>기사 요약과 소견이 함께 갑니다.</i>"
-    )
-    ok, err = tg.send_message(token, chat_id, text,
+    ok, err = tg.send_message(token, chat_id, menu_text(date_str),
                               reply_markup=build_keyboard(date_str, cats))
     if not ok:
         print(f"메뉴 발송 실패: {err}")
@@ -207,9 +218,7 @@ def handle_message(token, msg):
                             "오늘 브리핑이 아직 준비되지 않았습니다.\n"
                             "PC에서 Claude Code 를 열고 <code>/brief</code> 를 실행해 주세요.")
             return
-        tg.send_message(token, str(chat_id),
-                        f"<b>📊 {pretty_date(date_str)} 경제 브리핑</b>\n\n"
-                        f"보고 싶은 항목을 눌러 주세요.",
+        tg.send_message(token, str(chat_id), menu_text(date_str),
                         reply_markup=build_keyboard(date_str, cats))
         print(f"  [명령] {text or '(빈 메시지)'} -> 메뉴 전송")
     elif text.startswith("/help"):
