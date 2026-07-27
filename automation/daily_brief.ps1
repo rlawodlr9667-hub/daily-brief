@@ -44,6 +44,44 @@ function Write-Log {
 }
 
 # ---------------------------------------------------------------------------
+# 실행하는 동안 노트북이 잠들지 않게 막기
+# ---------------------------------------------------------------------------
+# 2026-07-27 에 실제로 겪은 일입니다. 09:59 에 시작해서 브리핑 4개까지
+# 정상으로 썼는데, 10:07 에 노트북이 절전(현대 대기)에 들어가면서 프로세스가
+# 통째로 죽었습니다. 작업 스케줄러에는 종료코드 0xC000013A 만 남고, 마지막
+# 단계인 '버튼 메뉴 발송'에 도달하지 못해 텔레그램이 조용했습니다.
+#
+# 작업 스케줄러에는 '실행하는 동안 깨워 두기' 옵션이 없습니다. WakeToRun 은
+# 시작 시점에 한 번 깨울 뿐이라, 시작한 뒤에 잠드는 것은 막지 못합니다.
+# 그래서 윈도우에게 직접 "지금 작업 중이니 재우지 마라"고 알립니다.
+#
+# 주의: 사용자가 노트북 덮개를 닫거나 직접 절전을 누르면 그건 못 막습니다.
+# 막을 수 있는 것은 '가만히 있어서 저절로 잠드는' 경우입니다.
+Add-Type -Namespace Win32 -Name Power -MemberDefinition @'
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern uint SetThreadExecutionState(uint esFlags);
+'@ -ErrorAction SilentlyContinue
+
+function Set-KeepAwake {
+    param([switch]$Off)
+    # 0x80000000 뒤의 L 을 빼면 안 됩니다. PowerShell 5.1 은 L 이 없으면 이 값을
+    # 32비트 정수로 읽어서 -2147483648 이 되고, [uint32] 로 바꾸는 순간 예외가
+    # 납니다. 아래 try/catch 에 걸려 조용히 무시되므로, 절전 차단이 안 걸린 채
+    # 잘 도는 것처럼 보이게 됩니다.
+    $ES_CONTINUOUS       = [uint32]0x80000000L
+    $ES_SYSTEM_REQUIRED  = [uint32]0x00000001
+    try {
+        if ($Off) {
+            # 평소 상태로 되돌립니다. (스크립트가 끝나면 윈도우가 알아서
+            #  풀어주긴 하지만, 명시해 두는 편이 읽기에 분명합니다)
+            [void][Win32.Power]::SetThreadExecutionState($ES_CONTINUOUS)
+        } else {
+            [void][Win32.Power]::SetThreadExecutionState($ES_CONTINUOUS -bor $ES_SYSTEM_REQUIRED)
+        }
+    } catch { }
+}
+
+# ---------------------------------------------------------------------------
 # claude 실행 파일 찾기
 # ---------------------------------------------------------------------------
 # VS Code 확장 안에 들어 있는데 경로에 버전 번호가 붙습니다
@@ -73,6 +111,7 @@ function Find-ClaudeExe {
 }
 
 # ---------------------------------------------------------------------------
+Set-KeepAwake
 Write-Log "===== 브리핑 자동 생성 시작 ($today) ====="
 
 # 수집 범위: 월요일은 주말 기사까지 담아야 하므로 넓게 잡습니다.
@@ -152,4 +191,5 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Log "===== 완료. 텔레그램을 확인하세요. ====="
+Set-KeepAwake -Off
 exit 0
