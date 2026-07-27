@@ -1,10 +1,18 @@
 name: 아침 브리핑 생성
 
-# 매일 한국시간 08:50 에 실행합니다.
+# 매일 한국시간 08:50 에 시작해서 09시쯤 텔레그램에 도착하도록 맞췄습니다.
 # GitHub 의 cron 은 UTC 기준이라 08:50 KST = 23:50 UTC (전날) 입니다.
+#
+# 두 번 걸어 둔 이유:
+#   GitHub 의 무료 예약 실행은 "정한 시각에 반드시 돌린다"가 아니라
+#   "여유가 되면 돌린다" 입니다. 부하가 몰리면 늦추거나 아예 건너뜁니다.
+#   실제로 2026-07-27 아침 실행은 실패한 게 아니라 시작조차 하지 않았습니다.
+#   그래서 09:40 에 한 번 더 확인합니다. 아침에 정상으로 보냈으면 이 실행은
+#   아래 '오늘 무엇이 필요한지 확인' 단계에서 곧바로 끝나므로 낭비가 없습니다.
 on:
   schedule:
-    - cron: '50 23 * * *'
+    - cron: '50 23 * * *'   # 08:50 KST — 평소 실행 (09시경 도착)
+    - cron: '40 0 * * *'    # 09:40 KST — 위가 건너뛰었을 때만 대신 실행
   workflow_dispatch:        # 필요할 때 손으로 실행하는 버튼
 
 # 만든 브리핑을 저장소에 커밋해야 하므로 쓰기 권한이 필요합니다.
@@ -35,11 +43,34 @@ jobs:
         with:
           python-version: '3.12'
 
+      # 오늘 할 일을 먼저 정합니다. 백업 실행(09:40)이 아침에 이미 보낸 브리핑을
+      # 다시 만들어 두 번 보내는 일을 막습니다.
+      #   none = 이미 보냈음        -> 아무것도 안 함
+      #   send = 만들었는데 못 보냄 -> 발송만 다시
+      #   all  = 처음부터
+      - name: 오늘 무엇이 필요한지 확인
+        id: plan
+        run: |
+          TODAY=$(date +%F)
+          echo "today=$TODAY" >> "$GITHUB_OUTPUT"
+          if [ -f "briefs/$TODAY/.menu_sent" ]; then
+            echo "todo=none" >> "$GITHUB_OUTPUT"
+            echo "오늘 브리핑은 이미 보냈습니다. 여기서 끝냅니다."
+          elif ls "briefs/$TODAY"/*.md >/dev/null 2>&1; then
+            echo "todo=send" >> "$GITHUB_OUTPUT"
+            echo "브리핑 파일은 있는데 발송 기록이 없습니다. 발송만 다시 합니다."
+          else
+            echo "todo=all" >> "$GITHUB_OUTPUT"
+            echo "오늘 브리핑을 처음부터 만듭니다."
+          fi
+
       - uses: actions/setup-node@v4
+        if: steps.plan.outputs.todo == 'all'
         with:
           node-version: '20'
 
       - name: Claude Code 설치
+        if: steps.plan.outputs.todo == 'all'
         run: npm install -g @anthropic-ai/claude-code
 
       - name: 설정 확인
@@ -74,6 +105,7 @@ jobs:
 
       # 1단계 — 뉴스 수집. 월요일은 주말 기사까지 담기 위해 범위를 넓힙니다.
       - name: 뉴스 수집
+        if: steps.plan.outputs.todo == 'all'
         run: |
           if [ "$(date +%u)" = "1" ]; then HOURS=60; else HOURS=24; fi
           echo "수집 범위: 최근 ${HOURS}시간"
@@ -84,6 +116,7 @@ jobs:
       # 프롬프트는 automation/brief_prompt.txt 한 곳에만 둡니다.
       # 내 PC용 스크립트(automation/daily_brief.ps1)도 같은 파일을 읽습니다.
       - name: 항목별 요약 작성
+        if: steps.plan.outputs.todo == 'all'
         run: |
           TODAY=$(date +%F)
           PROMPT=$(sed "s/{DATE}/${TODAY}/g" automation/brief_prompt.txt)
@@ -94,6 +127,7 @@ jobs:
       # 파일이 진짜 만들어졌는지 확인합니다.
       # claude 가 성공을 보고했어도 파일이 없으면 빈 메뉴를 보내게 됩니다.
       - name: 작성 결과 확인
+        if: steps.plan.outputs.todo == 'all'
         run: |
           TODAY=$(date +%F)
           COUNT=$(ls -1 "briefs/${TODAY}"/*.md 2>/dev/null | wc -l)
@@ -105,7 +139,12 @@ jobs:
           ls -1 "briefs/${TODAY}"
 
       # 버튼을 눌렀을 때 읽을 수 있도록 저장소에 남깁니다.
+      #
+      # ★ 이 단계가 빠지면 버튼을 눌러도 아무 기사가 안 나옵니다. ★
+      # 버튼 클릭에 답하는 워크플로(button-poll.yml)는 저장소에서 파일을 읽기
+      # 때문에, 브리핑이 러너 안에만 있고 커밋되지 않으면 찾지 못합니다.
       - name: 브리핑 커밋
+        if: steps.plan.outputs.todo == 'all'
         run: |
           TODAY=$(date +%F)
           git config user.name  "github-actions[bot]"
@@ -115,12 +154,32 @@ jobs:
             echo "변경 사항 없음"
           else
             git commit -m "브리핑 ${TODAY}"
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" || true
             git push
           fi
 
       # 3단계 — 버튼 메뉴 발송
       - name: 버튼 메뉴 발송
+        if: steps.plan.outputs.todo != 'none'
         run: python bot_server.py --send-menu
+
+      # 보냈다는 표시를 남깁니다. 09:40 백업 실행이 이걸 보고 그냥 끝냅니다.
+      # 발송이 성공한 뒤에만 남기므로, 발송이 실패하면 백업이 다시 시도합니다.
+      - name: 발송 기록 남기기
+        if: steps.plan.outputs.todo != 'none'
+        run: |
+          TODAY=$(date +%F)
+          date -Iseconds > "briefs/${TODAY}/.menu_sent"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "briefs/${TODAY}/.menu_sent"
+          if git diff --cached --quiet; then
+            echo "변경 사항 없음"
+          else
+            git commit -m "발송 기록 ${TODAY}"
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" || true
+            git push
+          fi
 
       # 실패했을 때 조용히 넘어가면 안 됩니다. 텔레그램으로 알려 줍니다.
       - name: 실패 알림
